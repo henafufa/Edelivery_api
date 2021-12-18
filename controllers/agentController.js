@@ -2,14 +2,12 @@ const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 const config = require('../config/database');
 
-const Account = require('../models/account');
-const User = require('../models/user');
 
-const RETRY_MESSAGE = " Please try again.";
+const Agent = require('../models/agent');
 
 exports.register = async (req, res, next) => {
   try {
-    const account = new Account({
+    const newAgent = new Agent({
       _id: new mongoose.Types.ObjectId(),
       role: req.body.role,
       firstName: req.body.firstName,
@@ -17,31 +15,27 @@ exports.register = async (req, res, next) => {
       username: req.body.username,
       email: req.body.email,
       password: req.body.password,
-    });
-    const newUser = new User({
-      _id: new mongoose.Types.ObjectId(),
-      account: account,
       phoneNumber: req.body.phoneNumber,
       address: req.body.address
     });
 
     const email = req.body.email;
     const username = req.body.username;
-    User.getUserByEmail(email, (err, user) => {
-      if (user) {
+    Agent.getAgentByEmail(email, (err, agent) => {
+      if (agent) {
         return res.status(409).json({
           success: false,
           message: "Email address already exists. Please use different email address."
         });
       }
-      User.getUserByUsername(username, (err, user) => {
-        if (user) {
+      Agent.getAgentByUsername(username, (err, agent) => {
+        if (agent) {
           return res.status(500).json({
             success: false,
             message: "Username already exists. Please use different username."
           });
         }
-        User.addUser(newUser, (err, user) => {
+        Agent.addAgent(newAgent, (err, agent) => {
           if (err) {
             res.status(500).json({
               success: false,
@@ -63,24 +57,24 @@ exports.register = async (req, res, next) => {
 
 exports.login = async (req, res, next) => {
   try {
-    const email = req.body.email;
+    const username = req.body.username;
     const password = req.body.password;
 
-    User.getUserByEmail(email, (err, user) => {
+    Agent.getAgentByUsername(username, (err, agent) => {
       if (err) {
         res.status(401).json({
           success: false,
           message: "Authentication failed."
         });
       }
-      if (!user) {
+      if (!agent) {
         return res.json({
           success: false,
           message: "You are not registered. Please sign up first."
         });
       }
 
-      User.comparePassword(password, user.account.password, (err, isMatch) => {
+      Agent.comparePassword(password, agent.password, (err, isMatch) => {
         if (err) {
           return res.status(401).json({
             success: false,
@@ -88,18 +82,18 @@ exports.login = async (req, res, next) => {
           });
         }
         if (isMatch) {
-          const token = jwt.sign(user.toJSON(), config.secret, {
+          const token = jwt.sign(agent.toJSON(), config.secret, {
             expiresIn: 604800 // 1 week in sec
           });
           res.status(200).json({
             success: true,
             token: 'JWT ' + token,
-            user
+            agent
           });
         } else {
           return res.json({
             success: false,
-            message: 'You have entered wrong username or password.' + RETRY_MESSAGE
+            message: 'You have entered a wrong password.' + RETRY_MESSAGE
           });
         }
       });
@@ -109,78 +103,49 @@ exports.login = async (req, res, next) => {
   }
 }
 
-exports.getUserById = async (req, res, next) => {
-  const id = req.params.userId;
-  User.getUserById(id, (err, User) => {
+exports.getAgentById = async (req, res, next) => {
+  const id = req.params.agentId;
+  Agent.getAgentById(id, (err, Agent) => {
     if (err) {
       res.status(404).json({
         success: false,
-        message: "Can not get the user." + RETRY_MESSAGE
+        message: "Can not get the agent." + RETRY_MESSAGE
       });
     }
-    return res.json(User);
+    return res.json(Agent);
   });
 }
 
-exports.getUsers = (req, res, next) => {
-  User.getUsers((err, User) => {
+exports.getAgents = (req, res, next) => {
+  Agent.getAgents((err, Agent) => {
     if (err) {
       res.status(404).json({
         success: false,
-        message: "Failed to retrieve users." + RETRY_MESSAGE
+        message: "Failed to retrieve agents." + RETRY_MESSAGE
       });
     }
-    return res.json(User);
+    return res.json(Agent);
   });
 }
 
-exports.deleteUsers = async (req, res, next) => {
-  User
-    .remove()
+exports.deleteAgents = (req, res, next) => {
+  Agent.remove()
     .exec()
     .then(result => {
       res.status(200).json({
-        message: "All Users are deleted",
-      });
-    });
-}
-
-exports.deleteUserById = async (req, res, next) => {
-  const id = req.params.userId;
-  User
-    .findOneAndDelete({ _id: id })
-    .exec()
-    .then(result => {
-      if (result) {
-        res.status(200).json({
-          success: true,
-          message: "User deleted",
-          user: result
-        });
-      } else {
-        res.status(500).json({
-          success: false,
-          message: "User not deleted." + RETRY_MESSAGE,
-          user: result
-        });
-      }
-    })
-    .catch(err => {
-      res.status(500).json({
-        success: false,
-        message: "Error: " + err
+        message: "Agents deleted",
       });
     });
 }
 
 exports.updateProfile = (req, res, next) => {
-  const id = req.params.userId;
+  const id = req.params.agentId;
   let updateOps = {};
   for (const ops of req.body) {
     updateOps[ops.propName] = ops.value;
   }
   let data = { $set: updateOps };
-  User.updateUserData(id, data, (err, User) => {
+  Agent.updateAgentData(id, data, (err, Agent) => {
     if (err) {
       res.status(200).json({
         success: false,
@@ -190,15 +155,15 @@ exports.updateProfile = (req, res, next) => {
     return res.status(500).json({
       success: true,
       message: "Profile successfully updated.",
-      user: User
+      agent: Agent
     });
   });
 }
 
 exports.uploadImage = (req, res, next) => {
-  const id = req.params.userId;
+  const id = req.params.agentId;
   const img = req.file.path;
-  User.updateUserData(id, { profilePicture: img }, (err, User) => {
+  Agent.updateAgentData(id, { profilePicture: img }, (err, Agent) => {
     if (err) {
       res.status(200).json({
         success: false,
@@ -208,8 +173,29 @@ exports.uploadImage = (req, res, next) => {
     return res.status(500).json({
       success: true,
       message: "Profile picture successfully updated.",
-      user: User
+      agent: Agent
     });
   });
 }
 
+exports.manageAccount = async (req, res, next) => {
+  const id = req.params.agentId;
+  let updateOps = {};
+  for (const ops of req.body) {
+    updateOps[ops.propName] = ops.value;
+  }
+  let data = { $set: updateOps };
+  Agent.manageAccount(id, data, (err, Agent) => {
+    if (err) {
+      res.status(200).json({
+        success: false,
+        message: "Failed to approve account" + RETRY_MESSAGE
+      });
+    }
+    return res.status(500).json({
+      success: true,
+      message: "Account successfully approved.",
+      agent: Agent
+    });
+  });
+};

@@ -7,29 +7,6 @@ const CancelledOrder = require('../models/cancelledOrder');
 const ORDER_STATUS_PENDING = "PENDING";
 const RETRY_MESSAGE = " Please try again.";
 
-exports.addItem = (req, res, next) => {
-  const item = new Item({
-    _id: new mongoose.Types.ObjectId(),
-    name: req.body.name,
-    category: req.body.category,
-    weightRange: req.body.weightRange,
-    quantity: req.body.quantity,
-  });
-  Item.setItem(item, (err, Item) => {
-    if (err) {
-      res.status(500).json({
-        success: false,
-        message: "Failed to save item. " + RETRY_MESSAGE
-      });
-    } else {
-      res.status(200).json({
-        success: true,
-        message: "Item successfully saved.",
-        item: Item
-      });
-    }
-  });
-}
 exports.addOrder = (req, res, next) => {
   const item = new Item({
     _id: new mongoose.Types.ObjectId(),
@@ -47,8 +24,9 @@ exports.addOrder = (req, res, next) => {
     status: ORDER_STATUS_PENDING,
     orderer: req.body.orderer,
     receiver: req.body.receiver,
-    assignee: {},
+    assignee: req.body.assignee,
   });
+  
 
   Order.setOrder(order, (err, Order) => {
     if (err) {
@@ -111,7 +89,7 @@ exports.updateOrder = (req, res, next) => {
     updateOps[ops.propName] = ops.value;
   }
   let data = { $set: updateOps };
-  Order.updateOrder(id, data, (err, Order) => {
+  Order.updateOrder(id, data, (err, order) => {
     if (err) {
       res.status(404).json({
         success: false,
@@ -121,7 +99,7 @@ exports.updateOrder = (req, res, next) => {
     return res.status(200).json({
       success: true,
       message: "Order detail updated",
-      order: Order
+      order: order
     });
   });
 }
@@ -140,7 +118,7 @@ exports.deleteOrders = async (req, res, next) => {
 exports.deleteOrderById = async (req, res, next) => {
   const id = req.params.id;
   Order
-    .remove({ _id: id })
+    .findOneAndDelete({ _id: id })
     .exec()
     .then(result => {
       res.status(200).json({
@@ -159,56 +137,58 @@ exports.cancelOrder = (req, res, next) => {
   const fee = updateOps.cancellationFee;
 
   let cancelledOrder = {};
-  Order.getOrderById(id, (err, order) => {
+  let data = { $set: { status: updateOps.status } };
+
+  Order.updateOrder(id, data, (err, order) => {
     if (err) {
       res.status(404).json({
         success: false,
-        message: "Can not get the order." + RETRY_MESSAGE
+        message: "Failed to save response." + RETRY_MESSAGE
       });
     }
-
-    cancelledOrder = new CancelledOrder({
-      _id: new mongoose.Types.ObjectId(),
-      order: order,
-      reason: reason,
-      fee: fee
-    });
-
-    CancelledOrder.saveCancelledOrder(cancelledOrder, (err, CancelledOrder) => {
+    Order.getOrderById(id, (err, order) => {
       if (err) {
         res.status(404).json({
           success: false,
-          message: "Failed to cancel order"
+          message: "Can not get the order." + RETRY_MESSAGE
         });
       }
-      let data = { $set: { status: updateOps.status } };
-
-      Order.updateOrder(id, data, (err, Order) => {
-        if (err) {
-          res.status(404).json({
-            success: false,
-            message: "Failed to save response." + RETRY_MESSAGE
-          });
-        }
-        return res.status(200).json({
-          success: true,
-          message: "Order cancelled",
-          order: cancelledOrder
+      else {
+        cancelledOrder = new CancelledOrder({
+          _id: new mongoose.Types.ObjectId(),
+          order: order,
+          reason: reason,
+          fee: fee
         });
-      });
+        CancelledOrder.saveCancelledOrder(cancelledOrder, (err, cancelledOrder) => {
+          if (err) {
+            res.status(404).json({
+              success: false,
+              message: "Failed to cancel order"
+            });
+          } else {
+            res.status(200).json({
+              success: true,
+              message: "Order cancelled",
+              order: cancelledOrder
+            });
+          }
+        });
+        Order.deleteById(id, () => { })
+      }
     });
   });
 }
 
 
 exports.getCancelledOrders = (req, res, next) => {
-  CancelledOrder.getCancelledOrders((err, CancelledOrder) => {
+  CancelledOrder.getAll((err, Order) => {
     if (err) {
       res.status(404).json({
         success: false,
         message: "Failed to retrieve orders." + RETRY_MESSAGE
       });
     }
-    return res.json(CancelledOrder);
+    return res.json(Order);
   });
 }
